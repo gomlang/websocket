@@ -115,10 +115,10 @@ complete closing handshake from truncated/abnormal EOF.
 ## Validation
 
 ```sh
-cd ecosystem/websocket
-../../stage2/bin/goml fmt --check
-../../stage2/bin/goml test
-GOFLAGS=-race ../../stage2/bin/goml test --target-dir _artifact/race --timeout 300s
+cd ~/git/gomlang/websocket
+../../goml-dev/stage2/bin/goml fmt --check
+../../goml-dev/stage2/bin/goml test
+GOFLAGS=-race ../../goml-dev/stage2/bin/goml test --target-dir _artifact/race --timeout 300s
 ```
 
 Native GoML tests cover the RFC accept digest and exact Hello wire vectors,
@@ -127,7 +127,7 @@ opcodes, masking direction, UTF-8 split across fragments, interleaved controls,
 close states, bounded queue retry, payload isolation, short I/O, coalesced
 upgrade bytes, real local TCP echo/close, concurrent send/receive, cancellation,
 read-deadline resume and wakeup on abort. The independent versioned consumer in
-`../consumers/websocket` performs a real TCP handshake, Unicode echo and closing
+`../../goml-dev/ecosystem/consumers/websocket` performs a real TCP handshake, Unicode echo and closing
 handshake using only exported APIs.
 
 This version deliberately has no compression extensions, HTTP/2 extended
