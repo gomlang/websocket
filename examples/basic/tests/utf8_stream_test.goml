@@ -1,0 +1,26 @@
+package tests;
+
+use ecosystem::websocket as ws;
+use std::bytes;
+use std::testing;
+
+#[test]
+fn downstream_rejects_impossible_text_before_fin() -> () {
+    let client = testing::expect_ok(
+        ws::Session::new(ws::Role::Client, ws::Limits::standard()),
+        "session",
+    );
+    let frame = testing::expect_ok(
+        ws::encode_frame(
+            ws::Frame {
+                opcode: ws::Opcode::Text,
+                final: false,
+                payload: bytes::Bytes::from_vec(b"\xed\xa0"),
+            },
+            Option::None,
+        ),
+        "frame",
+    );
+    testing::assert_ok(client.feed(frame.as_slice()));
+    testing::assert_eq(testing::expect_err(client.next(), "UTF8 prefix").kind, ws::ErrorKind::Utf8);
+}
