@@ -94,7 +94,13 @@ frame limits and configured payload limits before allocating payload storage.
 
 `Session::feed`, `next`, `send` and `send_fragmented` expose the protocol engine
 without I/O. Text and close reasons require valid UTF-8; text scalars may span
-fragments. Continuations, interrupted messages, close status codes and aggregate
+fragments. Text payloads are validated incrementally: an impossible leading or
+continuation byte fails immediately when its fragment is processed, even before
+FIN. A valid incomplete scalar is retained until a later continuation; ping/pong
+frames leave that state intact. Overlong sequences, surrogate encodings, values
+above U+10FFFF and unfinished final scalars fail under
+[RFC 6455 section 8.1](https://www.rfc-editor.org/rfc/rfc6455.html#section-8.1).
+Binary frames retain arbitrary bytes. Continuations, interrupted messages, close status codes and aggregate
 message sizes are checked. A ping/pong may occur between data fragments. Only
 `Connection` synchronizes access: an individual `Session`, `Decoder` or
 `HandshakeDecoder` requires one task or external synchronization.

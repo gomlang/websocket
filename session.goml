@@ -52,6 +52,9 @@ pub struct Session {
     state_value: Ref[State],
     fragments: Ref[bytes::Bytes],
     fragment_kind: Ref[Option[Opcode]],
+    text_remaining: Ref[isize],
+    text_low: Ref[u8],
+    text_high: Ref[u8],
     pending: Ref[Option[Frame]],
     output: Ref[Vec[bytes::Bytes]],
     output_offset: Ref[isize],
@@ -68,6 +71,9 @@ impl Session {
                 state_value: Ref::new(State::Open),
                 fragments: Ref::new(bytes::Bytes::new()),
                 fragment_kind: Ref::new(Option::None),
+                text_remaining: Ref::new(0),
+                text_low: Ref::new(128),
+                text_high: Ref::new(191),
                 pending: Ref::new(Option::None),
                 output: Ref::new(Vec::new()),
                 output_offset: Ref::new(0),
@@ -342,6 +348,9 @@ impl Session {
         if frame.payload.len() > self.limits.message_bytes - self.fragments.get().len() {
             return Result::Err(error(ErrorKind::Limit, "fragmented message exceeds byte limit"))
         }
+        if kind == Opcode::Text {
+            self.validate_text(frame.payload, frame.final)?;
+        }
         self.fragments.get().extend_from_slice(frame.payload.as_slice());
         if !frame.final {
             self.fragment_kind.set(Option::Some(kind));
@@ -360,6 +369,53 @@ impl Session {
             Message::Binary(data)
         };
         Result::Ok(Option::Some(message))
+    }
+
+    fn validate_text(self: Session, data: bytes::Bytes, final: bool) -> Result[(), Error] {
+        for byte in data.as_slice() {
+            if self.text_remaining.get() > 0 {
+                if byte < self.text_low.get() || byte > self.text_high.get() {
+                    return Result::Err(error(ErrorKind::Utf8, "invalid fragmented text UTF-8"))
+                }
+                self.text_remaining.set(self.text_remaining.get() - 1);
+                self.text_low.set(128);
+                self.text_high.set(191);
+            } else if byte < 128 {
+                continue
+            } else {
+                self.text_low.set(
+                    if byte == 224 {
+                        160
+                    } else if byte == 240 {
+                        144
+                    } else {
+                        128
+                    },
+                );
+                self.text_high.set(
+                    if byte == 237 {
+                        159
+                    } else if byte == 244 {
+                        143
+                    } else {
+                        191
+                    },
+                );
+                if byte >= 194 && byte <= 223 {
+                    self.text_remaining.set(1);
+                } else if byte >= 224 && byte <= 239 {
+                    self.text_remaining.set(2);
+                } else if byte >= 240 && byte <= 244 {
+                    self.text_remaining.set(3);
+                } else {
+                    return Result::Err(error(ErrorKind::Utf8, "invalid fragmented text UTF-8"))
+                }
+            }
+        }
+        if final && self.text_remaining.get() != 0 {
+            return Result::Err(error(ErrorKind::Utf8, "unfinished text UTF-8 scalar"))
+        }
+        Result::Ok(())
     }
 
     pub fn finish(self: Session) -> Result[(), Error] {
