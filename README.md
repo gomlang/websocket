@@ -2,7 +2,7 @@
 
 An RFC 6455 WebSocket protocol implementation in GoML. The protocol, HTTP
 upgrade validation, SHA-1 accept calculation, framing, masking, message assembly,
-close state machine and bounded queues are implemented in `.gom` files. The
+close state machine and bounded queues are implemented in `.goml` files. The
 standard library supplies cryptographic randomness, Base64, UTF-8, contexts and
 TCP/TLS streams; this module contains no Go adapter or Python helper.
 
@@ -137,7 +137,7 @@ server application. Cross-implementation Autobahn certification is not claimed.
 
 ## Development and examples
 
-Requires GoML 0.1.55 or newer. The `examples/basic/` example shares the root manifest and its dependencies. From the library root, run:
+Requires GoML 0.1.56 or newer. The `examples/basic/` example shares the root manifest and its dependencies. From the library root, run:
 
 ```sh
 goml run --example basic
