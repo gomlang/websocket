@@ -1,0 +1,44 @@
+package tests;
+
+use ecosystem::websocket as ws;
+use std::bytes;
+use std::testing;
+use std::utf8;
+
+#[test]
+fn upgrade_validates_all_list_members_on_both_sides() -> () {
+    let client = request();
+    let request_text = testing::expect_ok(utf8::decode(client.encode().to_vec()), "request");
+    let server = testing::expect_ok(ws::ServerRequest::parse(client.encode(), 16384), "server");
+    let response_text = testing::expect_ok(
+        utf8::decode(testing::expect_ok(server.response(Option::None), "response").to_vec()),
+        "response text",
+    );
+    for (header, value) in[
+        ("Connection: Upgrade", "Connection: Upgrade, bad token"),
+        ("Connection: Upgrade", "Connection: Upgrade, h2/2"),
+        ("Upgrade: websocket", "Upgrade: websocket, h2/"),
+        ("Upgrade: websocket", "Upgrade: websocket, h2/2/3"),
+        ("Upgrade: websocket", "Upgrade: websocket, \"other\""),
+    ] {
+        testing::assert(
+            ws::ServerRequest::parse(
+                bytes::Bytes::from_string(request_text.replace(header, value)),
+                16384,
+            ).is_err(),
+        );
+        testing::assert(
+            client.validate_response(
+                bytes::Bytes::from_string(response_text.replace(header, value)),
+                16384,
+            ).is_err(),
+        );
+    }
+    let valid_request = request_text.replace(
+        "Connection: Upgrade",
+        "Connection: , keep-alive,, UpGrAdE,",
+    ).replace("Upgrade: websocket", "Upgrade: h2/2, websocket,");
+    testing::assert_ok(ws::ServerRequest::parse(bytes::Bytes::from_string(valid_request), 16384));
+    let valid_response = response_text.replace("Connection: Upgrade", "Connection: , UpGrAdE,,");
+    testing::assert_ok(client.validate_response(bytes::Bytes::from_string(valid_response), 16384));
+}

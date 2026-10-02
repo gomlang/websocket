@@ -1,0 +1,11 @@
+package tests;
+
+use ecosystem::websocket as ws;
+use std::bytes;
+use std::testing;
+
+#[test]
+fn downstream_rejects_invalid_upgrade_companion_token() -> () {
+    let head = "GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: upgrade, invalid token\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n";
+    testing::assert(ws::ServerRequest::parse(bytes::Bytes::from_string(head), 4096).is_err());
+}
