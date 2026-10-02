@@ -126,8 +126,7 @@ every split of a handshake/frame, 16/64-bit lengths, invalid headers and
 opcodes, masking direction, UTF-8 split across fragments, interleaved controls,
 close states, bounded queue retry, payload isolation, short I/O, coalesced
 upgrade bytes, real local TCP echo/close, concurrent send/receive, cancellation,
-read-deadline resume and wakeup on abort. The independent versioned consumer in
-`consumer` performs a real TCP handshake, Unicode echo and closing
+read-deadline resume and wakeup on abort. The `examples/basic` example performs a real TCP handshake, Unicode echo and closing
 handshake using only exported APIs.
 
 This version deliberately has no compression extensions, HTTP/2 extended
@@ -135,3 +134,15 @@ CONNECT, HTTP/3, redirects, proxy negotiation, URL parser or automatic heartbeat
 scheduler. HTTP upgrade integration with `web`/`request` can use the public
 handshake helpers and `Connection::upgraded`. Origin policy belongs to the
 server application. Cross-implementation Autobahn certification is not claimed.
+
+## Development and examples
+
+Requires GoML 0.1.55 or newer. The `examples/basic/` example shares the root manifest and its dependencies. From the library root, run:
+
+```sh
+goml run --example basic
+goml test
+goml verify --timeout 300s
+```
+
+`goml test` builds the example and runs its tests. `goml verify` repeats the example checks as an independent module against an isolated registry snapshot. `(cd ../verification && just ecosystem-test websocket)` also retains the library-specific smoke and compatibility checks.
