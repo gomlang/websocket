@@ -300,18 +300,34 @@ fn all(headers: Vec[(string, string)], key: string) -> string {
     joined(values)
 }
 
-fn contains_token(value: string, expected: string) -> bool {
-    for value in text::split(value, ",") {
-        if text::to_ascii_lowercase(text::trim(value)) == expected {
-            return true
+fn contains_token(value: string, expected: string, upgrade: bool) -> Result[bool, Error] {
+    let mut found = false;
+    for item in text::split(value, ",") {
+        let item = text::trim(item);
+        if item == "" {
+            continue
+        }
+        let valid = if upgrade {
+            match text::split_once(item, "/") {
+                Some((name, version)) => token(name) && token(version),
+                None => token(item),
+            }
+        } else {
+            token(item)
+        };
+        if !valid {
+            return Result::Err(error(ErrorKind::Handshake, "invalid HTTP upgrade token list"))
+        }
+        if text::to_ascii_lowercase(item) == expected {
+            found = true;
         }
     }
-    false
+    Result::Ok(found)
 }
 
 fn validate_upgrade(headers: Vec[(string, string)]) -> Result[(), Error] {
-    if !contains_token(all(headers, "upgrade"), "websocket")
-        || !contains_token(all(headers, "connection"), "upgrade") {
+    if !contains_token(all(headers, "upgrade"), "websocket", true)?
+        || !contains_token(all(headers, "connection"), "upgrade", false)? {
         return Result::Err(error(ErrorKind::Handshake, "missing WebSocket upgrade headers"))
     }
     if has(headers, "transfer-encoding")
