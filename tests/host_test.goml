@@ -1,0 +1,84 @@
+package tests;
+
+use ecosystem::websocket as ws;
+use std::bytes;
+use std::testing;
+
+fn invalid_handshake_hosts() -> Vec[string] {
+    Vec::from_array(
+        [
+            "user@server.example",
+            "server.example/path",
+            "server.example?query",
+            "server.example#fragment",
+            "server.example:port",
+            "server.example:80:90",
+            "[::1",
+            "[invalid]",
+            "::1",
+            "ex%GG.test",
+            ":80",
+            "[]:80",
+        ],
+    )
+}
+
+fn handshake_with_host(host: string) -> bytes::Bytes {
+    bytes::Bytes::from_string(
+        "GET /chat HTTP/1.1\r\nHost: " + host + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+    )
+}
+
+#[test]
+fn client_handshake_rejects_malformed_host_authorities() -> () {
+    for host in invalid_handshake_hosts() {
+        testing::assert_eq(
+            testing::expect_err(
+                ws::ClientRequest::with_key(host, "/chat", Vec::new(), "dGhlIHNhbXBsZSBub25jZQ=="),
+                "invalid host must not be encoded",
+            ).kind,
+            ws::ErrorKind::InvalidInput,
+        );
+    }
+}
+
+#[test]
+fn server_handshake_rejects_malformed_host_authorities() -> () {
+    for host in invalid_handshake_hosts() {
+        testing::assert_eq(
+            testing::expect_err(
+                ws::ServerRequest::parse(handshake_with_host(host), 16384),
+                "invalid host must not be accepted",
+            ).kind,
+            ws::ErrorKind::Handshake,
+        );
+    }
+}
+
+#[test]
+fn handshake_preserves_valid_host_authority_spelling() -> () {
+    for host in[
+        "localhost",
+        "EXAMPLE.com:080",
+        "example.com:",
+        "127.0.0.1:0",
+        "[::1]:443",
+        "[2001:db8::1]",
+        "[v1.future]",
+        "ex%61mple.test",
+    ] {
+        let request = testing::expect_ok(
+            ws::ClientRequest::with_key(host, "/chat", Vec::new(), "dGhlIHNhbXBsZSBub25jZQ=="),
+            "valid host",
+        );
+        let parsed = testing::expect_ok(ws::ServerRequest::parse(request.encode(), 16384), "parse");
+        testing::assert_eq(parsed.host, host);
+        testing::assert_ok(
+            request.validate_response(
+                testing::expect_ok(parsed.response(Option::None), "response"),
+                16384,
+            ),
+        );
+    }
+}

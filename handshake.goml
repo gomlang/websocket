@@ -3,6 +3,7 @@ package websocket;
 use std::bytes;
 use std::crypto::rand;
 use std::encoding::base64;
+use std::net::url;
 use std::text;
 use std::utf8;
 
@@ -63,6 +64,16 @@ fn clean(value: string, spaces: bool) -> bool {
     true
 }
 
+fn valid_host(value: string) -> bool {
+    if !clean(value, false) {
+        return false
+    }
+    match url::Authority::parse(value, value.byte_len()) {
+        Ok(authority) => authority.raw_host() != "" && authority.userinfo().is_none(),
+        Err(_) => false,
+    }
+}
+
 fn protocols(value: string) -> Result[Vec[string], Error] {
     let result: Vec[string] = Vec::new();
     for item in text::split(value, ",") {
@@ -112,8 +123,7 @@ impl ClientRequest {
         ClientRequest,
         Error,
     ] {
-        if host.len() == 0 || !clean(host, false) || !clean(target, false)
-            || !text::starts_with_at(target, 0, "/")
+        if !valid_host(host) || !clean(target, false) || !text::starts_with_at(target, 0, "/")
             || text::find(target, "#").is_some() {
             return Result::Err(
                 error(ErrorKind::InvalidInput, "invalid host or origin-form request target"),
@@ -216,7 +226,7 @@ impl ServerRequest {
         }
         validate_upgrade(headers)?;
         let host = one(headers, "host", true)?;
-        if !clean(host, false) {
+        if !valid_host(host) {
             return Result::Err(error(ErrorKind::Handshake, "invalid host"))
         }
         if one(headers, "sec-websocket-version", true)? != "13" {

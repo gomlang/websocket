@@ -39,6 +39,9 @@ members fail even when the required websocket or upgrade token is present. Empty
 comma-list members are ignored, as HTTP list parsing permits.
 Requests and responses reject
 ambiguous critical headers, body framing, line folding and injected control bytes.
+Client construction and server parsing validate Host authority syntax, including
+IP-literal brackets, percent escapes and decimal ports. Empty hosts, userinfo,
+paths and query/fragment delimiters are rejected. Valid Host spelling is retained.
 
 `server(transport, limits, context, select_protocol)` parses the request, invokes
 an application callback with target, host, origin and offered protocols, and
