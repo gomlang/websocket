@@ -106,11 +106,26 @@ fn buffer(size: isize) -> bytes::Bytes {
     output
 }
 
-fn read_head(stream: Transport, limits: Limits, ctx: context::Context) -> Result[
+fn informational_head(head: bytes::Bytes, limit: isize) -> Result[bool, Error] {
+    let (first, _) = parse_head(head, limit)?;
+    let parts = first.split(" ");
+    if parts.len() < 3 || parts[0] != "HTTP/1.1" || parts[1].byte_len() != 3 {
+        return Result::Ok(false)
+    }
+    let status = parts[1].to_bytes();
+    Result::Ok(
+        status[0] == b'1' && status[1] >= b'0' && status[1] <= b'9' && status[2] >= b'0'
+            && status[2] <= b'9'
+            && parts[1] != "101",
+    )
+}
+
+fn read_head(stream: Transport, limits: Limits, ctx: context::Context, skip_informational: bool) -> Result[
     (bytes::Bytes, bytes::Bytes),
     Error,
 ] {
-    let decoder = HandshakeDecoder::new(limits.handshake_bytes)?;
+    let mut remaining = limits.handshake_bytes;
+    let mut decoder = HandshakeDecoder::new(remaining)?;
     let scratch = buffer(
         if limits.buffered_bytes < 4096 {
             limits.buffered_bytes
@@ -123,9 +138,24 @@ fn read_head(stream: Transport, limits: Limits, ctx: context::Context) -> Result
         if count == 0 {
             return Result::Err(error(ErrorKind::UnexpectedEof, "EOF during opening handshake"))
         }
-        let consumed = decoder.push(scratch.slice(0, count))?;
-        if let Some(head) = decoder.head() {
-            return Result::Ok((head, bytes::Bytes::from_slice_copy(scratch.slice(consumed, count))))
+        let mut consumed = 0;
+        while consumed < count {
+            consumed += decoder.push(scratch.slice(consumed, count))?;
+            if let Some(head) = decoder.head() {
+                remaining -= head.len();
+                if skip_informational && informational_head(head, limits.handshake_bytes)? {
+                    if remaining == 0 {
+                        return Result::Err(
+                            error(ErrorKind::Limit, "HTTP handshake exceeds byte limit"),
+                        )
+                    }
+                    decoder = HandshakeDecoder::new(remaining)?;
+                } else {
+                    return Result::Ok(
+                        (head, bytes::Bytes::from_slice_copy(scratch.slice(consumed, count))),
+                    )
+                }
+            }
         }
     }
 }
@@ -151,7 +181,7 @@ fn client_inner(stream: Transport, request: ClientRequest, limits: Limits, ctx: 
         return Result::Err(error(ErrorKind::Limit, "request handshake exceeds byte limit"))
     }
     stream.write_all(encoded.as_slice(), ctx)?;
-    let (head, remainder) = read_head(stream, limits, ctx)?;
+    let (head, remainder) = read_head(stream, limits, ctx, true)?;
     let selected = request.validate_response(head, limits.handshake_bytes)?;
     let connection = Connection::upgraded(stream, Role::Client, limits, remainder)?;
     Result::Ok((connection, selected))
@@ -177,7 +207,7 @@ fn server_inner(
     select_protocol: (ServerRequest) -> Result[Option[string], Error],
 ) -> Result[Connection, Error] {
     limits.validate()?;
-    let (head, remainder) = read_head(stream, limits, ctx)?;
+    let (head, remainder) = read_head(stream, limits, ctx, false)?;
     let request = ServerRequest::parse(head, limits.handshake_bytes)?;
     let response = request.response(select_protocol(request)?)?;
     if response.len() > limits.handshake_bytes {

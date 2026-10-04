@@ -31,6 +31,11 @@ fn connect(stream: net::TcpStream, ctx: context::Context) -> Result[ws::Connecti
 ```
 
 `client` performs the HTTP/1.1 handshake and returns the selected subprotocol.
+It consumes informational responses such as 100 and 103 before validating the
+final 101 upgrade, retaining any frame bytes read alongside the headers. The
+combined response heads share the configured handshake byte limit, following
+[HTTP informational response handling](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.2)
+and [RFC 6455 section 4.1](https://www.rfc-editor.org/rfc/rfc6455.html#section-4.1).
 `ClientRequest::new` generates a cryptographically random 16-byte nonce;
 `with_key` supports explicit nonce vectors. `with_origin` adds an Origin header.
 Each requested subprotocol must be one nonempty HTTP token; entries containing
