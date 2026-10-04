@@ -326,18 +326,25 @@ impl Connection {
     pub fn flush(self: Connection, ctx: context::Context) -> Result[(), Error] {
         self.acquire(self.writer, ctx)?;
         defer self.writer.send(());
+        let mut frame: Option[bytes::Bytes] = Option::None;
+        let mut offset = 0;
         loop {
             self.acquire(self.gate, ctx)?;
-            let next = self.session.output();
+            // Only the active writer removes output; other operations append frames.
+            // Reuse this snapshot while retaining gate checks between short writes.
+            if frame.is_none() {
+                frame = self.session.output();
+                offset = 0;
+            }
             let closed = self.session.state() == State::Closed;
             self.gate.send(());
-            let Some(data) = next else {
+            let Some(data) = frame else {
                 if closed {
                     let _ = self.abort();
                 }
                 return Result::Ok(())
             };
-            let count = match self.stream.write(data.as_slice(), ctx) {
+            let count = match self.stream.write(data.slice(offset, data.len()), ctx) {
                 Ok(value) => value,
                 Err(problem) => {
                     let _ = self.abort();
@@ -348,6 +355,10 @@ impl Connection {
             let result = self.session.consume_output(count);
             self.gate.send(());
             result?;
+            offset += count;
+            if offset == data.len() {
+                frame = Option::None;
+            }
         }
     }
 

@@ -1,0 +1,300 @@
+package tests;
+
+use ecosystem::websocket as ws;
+use std::bytes;
+use std::context;
+use std::io;
+use std::testing;
+use std::time;
+
+#[test]
+fn short_writes_preserve_large_and_fragmented_messages_for_both_roles() -> () {
+    let payload = bytes::Bytes::from_string("0123456789abcdef".repeat(1024));
+    for role in[ws::Role::Client, ws::Role::Server] {
+        for frame_bytes in[125, 16384] {
+            for write_size in[1, 17] {
+                let limits = ws::Limits { frame_bytes, ..ws::Limits::standard() };
+                let stream = memory(bytes::Bytes::new(), 1, write_size);
+                let connection = testing::expect_ok(
+                    ws::Connection::upgraded(
+                        ws::Transport::from_io(stream),
+                        role,
+                        limits,
+                        bytes::Bytes::new(),
+                    ),
+                    "short writer",
+                );
+                defer {
+                    let _ = connection.abort();
+                };
+                let ctx = context::Context::background();
+                testing::assert_ok(connection.send(ws::Message::Binary(payload), ctx));
+                testing::assert_ok(connection.send(ws::Message::Text("following"), ctx));
+                let length = stream.output.len();
+                testing::assert_ok(connection.flush(ctx));
+                testing::assert_eq(stream.output.len(), length);
+                let peer = testing::expect_ok(
+                    ws::Session::new(
+                        if role == ws::Role::Client {
+                            ws::Role::Server
+                        } else {
+                            ws::Role::Client
+                        },
+                        limits,
+                    ),
+                    "peer",
+                );
+                testing::assert_ok(peer.feed(stream.output.as_slice()));
+                let ws::Message::Binary(received) = testing::expect_some(
+                    testing::expect_ok(peer.next(), "binary"),
+                    "message",
+                ) else {
+                    testing::fail("first message must be binary");
+                    return
+                };
+                testing::assert(received.to_vec() == payload.to_vec());
+                testing::assert_eq(next_text(peer), "following");
+                testing::assert_none(testing::expect_ok(peer.next(), "no duplicate message"));
+            }
+        }
+    }
+}
+
+#[test]
+fn partial_writes_keep_cancellation_abort_and_write_error_boundaries() -> () {
+    for mode in 0..3 {
+        context::with_cancel(
+            context::Context::background(),
+            |ctx, cancel| {
+                let output = bytes::Bytes::new();
+                let calls = Ref::new(0);
+                let closes = Ref::new(0);
+                let holder: Ref[Option[ws::Connection]] = Ref::new(Option::None);
+                let stream = ws::Transport::new(
+                    |_, _| Result::Ok(0),
+                    |data, _| {
+                        calls.set(calls.get() + 1);
+                        if mode == 2 && calls.get() == 2 {
+                            output.extend_from_slice(data.sub(0, 1));
+                            return Result::Err(
+                                io::Error::new(
+                                    io::ErrorKind::Other,
+                                    "write",
+                                    Option::None,
+                                    Option::None,
+                                    "failed after an unknown prefix",
+                                ),
+                            )
+                        }
+                        let count = if calls.get() == 1 {
+                            3
+                        } else {
+                            data.len()
+                        };
+                        output.extend_from_slice(data.sub(0, count));
+                        if calls.get() == 1 {
+                            if mode == 0 {
+                                cancel.cancel();
+                            }
+                            if mode == 1 {
+                                testing::assert_ok(
+                                    testing::expect_some(holder.get(), "connection").abort(),
+                                );
+                            }
+                        }
+                        Result::Ok(count)
+                    },
+                    || {
+                        closes.set(closes.get() + 1);
+                        Result::Ok(())
+                    },
+                );
+                let connection = testing::expect_ok(
+                    ws::Connection::upgraded(
+                        stream,
+                        ws::Role::Server,
+                        ws::Limits::standard(),
+                        bytes::Bytes::new(),
+                    ),
+                    "connection",
+                );
+                holder.set(Option::Some(connection));
+                defer {
+                    let _ = connection.abort();
+                };
+                let payload = bytes::Bytes::from_string("body".repeat(512));
+                let wire = testing::expect_ok(
+                    ws::encode_frame(
+                        ws::Frame { final: true, opcode: ws::Opcode::Binary, payload },
+                        Option::None,
+                    ),
+                    "wire",
+                );
+                let error = testing::expect_err(
+                    connection.send(ws::Message::Binary(payload), ctx),
+                    "interrupted send",
+                );
+                testing::assert_eq(
+                    error.kind,
+                    if mode == 0 {
+                        ws::ErrorKind::Cancelled
+                    } else if mode == 1 {
+                        ws::ErrorKind::Closed
+                    } else {
+                        ws::ErrorKind::Io
+                    },
+                );
+                testing::assert(
+                    output.to_vec()
+                        == wire.slice(
+                            0,
+                            if mode == 2 {
+                                4
+                            } else {
+                                3
+                            },
+                        ).to_vec(),
+                );
+                if mode == 0 {
+                    testing::assert(!connection.is_closed());
+                    testing::assert_eq(closes.get(), 0);
+                    testing::assert_ok(connection.flush(context::Context::background()));
+                    testing::assert(output.to_vec() == wire.to_vec());
+                    testing::assert_eq(calls.get(), 2);
+                } else {
+                    testing::assert(connection.is_closed());
+                    testing::assert_eq(closes.get(), 1);
+                    testing::assert_eq(
+                        calls.get(),
+                        if mode == 1 {
+                            1
+                        } else {
+                            2
+                        },
+                    );
+                }
+            },
+        );
+    }
+}
+
+#[test]
+fn reentrant_control_receive_appends_reply_without_replacing_partial_output() -> () {
+    for close in[false, true] {
+        let control = bytes::Bytes::from_vec(
+            if close {
+                b"\x03\xe8"
+            } else {
+                b"ping"
+            },
+        );
+        let input = testing::expect_ok(
+            ws::encode_frame(
+                ws::Frame {
+                    final: true,
+                    opcode: if close {
+                        ws::Opcode::Close
+                    } else {
+                        ws::Opcode::Ping
+                    },
+                    payload: control,
+                },
+                Option::Some(bytes::Bytes::from_vec(b"mask")),
+            ),
+            "incoming control",
+        );
+        let output = bytes::Bytes::new();
+        let interrupted = Ref::new(false);
+        let closes = Ref::new(0);
+        let holder: Ref[Option[ws::Connection]] = Ref::new(Option::None);
+        let stream = ws::Transport::new(
+            |_, _| {
+                testing::fail("control is already buffered");
+                Result::Ok(0)
+            },
+            |data, _| {
+                if !interrupted.get() {
+                    interrupted.set(true);
+                    context::with_timeout(
+                        context::Context::background(),
+                        time::Duration::from_milliseconds(25),
+                        |limited, _| {
+                            let connection = testing::expect_some(holder.get(), "connection");
+                            testing::assert_eq(
+                                testing::expect_err(
+                                    connection.receive(limited),
+                                    "reply waits for the active writer",
+                                ).kind,
+                                ws::ErrorKind::Timeout,
+                            );
+                            testing::assert(!connection.is_closed());
+                        },
+                    );
+                }
+                let count = if data.len() < 3 {
+                    data.len()
+                } else {
+                    3
+                };
+                output.extend_from_slice(data.sub(0, count));
+                Result::Ok(count)
+            },
+            || {
+                closes.set(closes.get() + 1);
+                Result::Ok(())
+            },
+        );
+        let connection = testing::expect_ok(
+            ws::Connection::upgraded(stream, ws::Role::Server, ws::Limits::standard(), input),
+            "connection",
+        );
+        holder.set(Option::Some(connection));
+        defer {
+            let _ = connection.abort();
+        };
+        let ctx = context::Context::background();
+        let payload = bytes::Bytes::from_string("pending".repeat(40));
+        testing::assert_ok(connection.send(ws::Message::Binary(payload), ctx));
+        let expected = testing::expect_ok(
+            ws::encode_frame(
+                ws::Frame { final: true, opcode: ws::Opcode::Binary, payload },
+                Option::None,
+            ),
+            "data frame",
+        );
+        expected.extend_from_slice(
+            testing::expect_ok(
+                ws::encode_frame(
+                    ws::Frame {
+                        final: true,
+                        opcode: if close {
+                            ws::Opcode::Close
+                        } else {
+                            ws::Opcode::Pong
+                        },
+                        payload: control,
+                    },
+                    Option::None,
+                ),
+                "control reply",
+            ).as_slice(),
+        );
+        testing::assert(output.to_vec() == expected.to_vec());
+        if close {
+            testing::assert(connection.is_closed());
+            testing::assert_eq(closes.get(), 1);
+        } else {
+            let ws::Message::Ping(value) = testing::expect_ok(
+                connection.receive(ctx),
+                "retained ping",
+            ) else {
+                testing::fail("ping was lost while the writer was active");
+                return
+            };
+            testing::assert(value.to_vec() == control.to_vec());
+            testing::assert(output.to_vec() == expected.to_vec());
+            testing::assert(!connection.is_closed());
+            testing::assert_eq(closes.get(), 0);
+        }
+    }
+}

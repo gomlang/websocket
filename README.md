@@ -101,6 +101,11 @@ Applications should treat
 an error after enqueueing a send as potentially transmitted; do not blindly
 repeat application operations.
 
+Each flush snapshots a queued frame once and advances through that snapshot
+when a transport accepts short writes. This keeps frame copying linear in the
+frame size while checking cancellation between writes. Public `Session::output`
+continues to return an independent copy of the current unsent bytes.
+
 ## Protocol engine and limits
 
 `Decoder` incrementally parses frames, validates the client/server mask
