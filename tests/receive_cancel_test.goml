@@ -1,0 +1,140 @@
+package tests;
+
+use ecosystem::websocket as ws;
+use std::bytes;
+use std::context;
+use std::testing;
+
+fn interrupted_control_reply(close: bool) -> () {
+    for short_write in[false, true] {
+        context::with_cancel(
+            context::Context::background(),
+            |ctx, cancel| {
+                let payload = if close {
+                    bytes::Bytes::from_vec(b"\x03\xe8")
+                } else {
+                    bytes::Bytes::from_string("heartbeat")
+                };
+                let input = testing::expect_ok(
+                    ws::encode_frame(
+                        ws::Frame {
+                            final: true,
+                            opcode: if close {
+                                ws::Opcode::Close
+                            } else {
+                                ws::Opcode::Ping
+                            },
+                            payload,
+                        },
+                        Option::None,
+                    ),
+                    "control frame",
+                );
+                if !close {
+                    input.extend_from_slice(
+                        testing::expect_ok(
+                            ws::encode_frame(text_frame("following"), Option::None),
+                            "text",
+                        ).as_slice(),
+                    );
+                }
+                let output = bytes::Bytes::new();
+                let interrupted = Ref::new(false);
+                let closed = Ref::new(false);
+                let stream = ws::Transport::new(
+                    |_, _| {
+                        testing::fail("buffered frames should not require another read");
+                        Result::Ok(0)
+                    },
+                    |buffer, _| {
+                        let count = if short_write {
+                            1
+                        } else {
+                            buffer.len()
+                        };
+                        output.extend_from_slice(buffer.sub(0, count));
+                        if !interrupted.get() {
+                            interrupted.set(true);
+                            cancel.cancel();
+                        }
+                        Result::Ok(count)
+                    },
+                    || {
+                        closed.set(true);
+                        Result::Ok(())
+                    },
+                );
+                let connection = testing::expect_ok(
+                    ws::Connection::upgraded(
+                        stream,
+                        ws::Role::Client,
+                        ws::Limits::standard(),
+                        input,
+                    ),
+                    "upgraded connection",
+                );
+                defer {
+                    let _ = connection.abort();
+                };
+                testing::assert_eq(
+                    testing::expect_err(connection.receive(ctx), "cancel during control reply").kind,
+                    ws::ErrorKind::Cancelled,
+                );
+                testing::assert(!connection.is_closed());
+                testing::assert(!closed.get());
+                let received = testing::expect_ok(
+                    connection.receive(context::Context::background()),
+                    "resume decoded message",
+                );
+                if close {
+                    let ws::Message::Close(Some(frame)) = received else {
+                        testing::fail("closing message must survive cancellation");
+                        return
+                    };
+                    testing::assert_eq(frame.code, 1000);
+                    testing::assert_eq(frame.reason, "");
+                    testing::assert(connection.is_closed());
+                    testing::assert(closed.get());
+                } else {
+                    let ws::Message::Ping(data) = received else {
+                        testing::fail("ping must be delivered before the following text");
+                        return
+                    };
+                    equal(data.to_vec(), payload.to_vec());
+                    testing::assert_eq(
+                        receive_text(connection, context::Context::background()),
+                        "following",
+                    );
+                    testing::assert(!connection.is_closed());
+                }
+                let parser = decoder(ws::Role::Server);
+                testing::assert_ok(parser.push(output.as_slice()));
+                let reply = testing::expect_some(
+                    testing::expect_ok(parser.next(), "control reply"),
+                    "reply",
+                );
+                testing::assert_eq(
+                    reply.opcode,
+                    if close {
+                        ws::Opcode::Close
+                    } else {
+                        ws::Opcode::Pong
+                    },
+                );
+                equal(reply.payload.to_vec(), payload.to_vec());
+                testing::assert_none(testing::expect_ok(parser.next(), "only one reply"));
+                testing::assert_ok(parser.finish());
+            },
+        );
+    }
+}
+
+#[test]
+fn cancelled_pong_flush_preserves_the_received_ping_and_message_order() -> () {
+    interrupted_control_reply(false);
+}
+
+#[test]
+fn cancelled_close_flush_preserves_the_received_close_until_wire_drain() -> () {
+    interrupted_control_reply(true);
+}

@@ -89,7 +89,10 @@ A pending receive does not prevent another task from sending. Concurrent sends
 serialize complete output frames; concurrent receives consume messages one at
 a time. Gate waits honor context cancellation. A write failure aborts the
 transport because an unknown prefix may already be on the wire. A TCP read
-timeout retains a partial frame for a later receive. Applications should treat
+timeout retains a partial frame for a later receive. If cancellation interrupts
+flushing an automatic control reply while the transport remains open, the next
+receive resumes the flush and returns the already decoded message in order.
+Applications should treat
 an error after enqueueing a send as potentially transmitted; do not blindly
 repeat application operations.
 

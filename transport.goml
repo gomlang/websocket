@@ -192,6 +192,8 @@ pub struct Connection {
     session: Session,
     gate: Channel[()],
     reader: Channel[()],
+    // The reader gate protects a decoded message until its reply is flushed.
+    received: Ref[Option[Message]],
     writer: Channel[()],
     closed: Channel[()],
     close_gate: Channel[()],
@@ -226,6 +228,7 @@ impl Connection {
                 session,
                 gate: gate(),
                 reader: gate(),
+                received: Ref::new(Option::None),
                 writer: gate(),
                 closed: Channel::new(0),
                 close_gate: gate(),
@@ -330,12 +333,17 @@ impl Connection {
         );
         loop {
             self.acquire(self.gate, ctx)?;
-            let event = self.session.next();
+            let event = match self.received.get() {
+                Some(message) => Result::Ok(Option::Some(message)),
+                None => self.session.next(),
+            };
             let capacity = self.limits.buffered_bytes - self.session.buffered_bytes();
             self.gate.send(());
             match event {
                 Ok(Some(message)) => {
+                    self.received.set(Option::Some(message));
                     self.flush(ctx)?;
+                    self.received.set(Option::None);
                     return Result::Ok(message)
                 },
                 Ok(None) => {},
