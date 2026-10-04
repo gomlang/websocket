@@ -130,6 +130,13 @@ impl ClientRequest {
             )
         }
         let _ = accept_key(key)?;
+        for protocol in requested_protocols {
+            if !token(protocol) {
+                return Result::Err(
+                    error(ErrorKind::InvalidInput, "each requested subprotocol must be one token"),
+                )
+            }
+        }
         if requested_protocols.len() > 0 {
             let _ = protocols(joined(requested_protocols))?;
         }

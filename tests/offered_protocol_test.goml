@@ -1,0 +1,50 @@
+package tests;
+
+use ecosystem::websocket as ws;
+use std::testing;
+
+#[test]
+fn offered_protocol_entries_must_each_be_one_http_token() -> () {
+    for protocol in[
+        "chat\r\n\r\n",
+        "\r\nchat",
+        "chat,superchat",
+        "chat, superchat",
+        " chat",
+        "chat ",
+        "\tchat",
+        "chat\t",
+    ] {
+        let error = testing::expect_err(
+            ws::ClientRequest::with_key(
+                "server.example",
+                "/chat",
+                Vec::from_array([protocol]),
+                "dGhlIHNhbXBsZSBub25jZQ==",
+            ),
+            "one entry cannot encode a different protocol list",
+        );
+        testing::assert_eq(error.kind, ws::ErrorKind::InvalidInput);
+    }
+}
+
+#[test]
+fn offered_protocol_entries_roundtrip_with_exact_spelling_and_case() -> () {
+    let offered = Vec::from_array(["chat", "CHAT", "v1!#$%&'*+-.^_`|~"]);
+    let request = testing::expect_ok(
+        ws::ClientRequest::with_key("server.example", "/chat", offered, "dGhlIHNhbXBsZSBub25jZQ=="),
+        "request",
+    );
+    let parsed = testing::expect_ok(ws::ServerRequest::parse(request.encode(), 16384), "parse");
+    equal(parsed.protocols, offered);
+    for protocol in offered {
+        let response = testing::expect_ok(
+            parsed.response(Option::Some(protocol)),
+            "select offered protocol",
+        );
+        equal(
+            testing::expect_ok(request.validate_response(response, 16384), "validate selection"),
+            Option::Some(protocol),
+        );
+    }
+}

@@ -33,6 +33,9 @@ fn connect(stream: net::TcpStream, ctx: context::Context) -> Result[ws::Connecti
 `client` performs the HTTP/1.1 handshake and returns the selected subprotocol.
 `ClientRequest::new` generates a cryptographically random 16-byte nonce;
 `with_key` supports explicit nonce vectors. `with_origin` adds an Origin header.
+Each requested subprotocol must be one nonempty HTTP token; entries containing
+whitespace, line endings or commas are rejected before encoding. Token spelling
+and case are preserved for exact response matching, and duplicate offers fail.
 The client verifies every Upgrade and Connection list member, the accept digest and subprotocol selection,
 and rejects extensions it did not negotiate. Upgrade protocol versions must use token/token syntax; malformed additional list
 members fail even when the required websocket or upgrade token is present. Empty
