@@ -1,0 +1,57 @@
+package websocket;
+
+use std::text;
+
+fn extension_parameter_value(value: string) -> bool {
+    if token(value) {
+        return true
+    }
+    let length = value.byte_len();
+    if length < 2 || value.byte_get(0) != b'"' || value.byte_get(length - 1) != b'"' {
+        return false
+    }
+    let decoded = Vec::new();
+    let mut index = 1;
+    while index < length - 1 {
+        if value.byte_get(index) == b'\\' {
+            index += 1;
+            if index == length - 1 {
+                return false
+            }
+        }
+        decoded.push(value.byte_get(index));
+        index += 1;
+    }
+    token(string_from_utf8(decoded).1)
+}
+
+fn valid_extension_offers(value: string) -> bool {
+    let mut count = 0;
+    // RFC 6455 requires unescaped quoted values to be tokens, so commas and
+    // semicolons cannot occur inside a valid quoted parameter value.
+    for extension in text::split(value, ",") {
+        let extension = text::trim(extension);
+        if extension == "" {
+            continue
+        }
+        let parts = text::split(extension, ";");
+        if !token(text::trim(parts[0])) {
+            return false
+        }
+        for index in 1..parts.len() {
+            let parameter = text::trim(parts[index]);
+            match text::split_once(parameter, "=") {
+                Some((name, value)) => {
+                    if !token(text::trim(name)) || !extension_parameter_value(text::trim(value)) {
+                        return false
+                    }
+                },
+                None => if !token(parameter) {
+                    return false
+                },
+            }
+        }
+        count += 1;
+    }
+    count > 0
+}

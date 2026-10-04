@@ -45,6 +45,9 @@ ambiguous critical headers, body framing, line folding and injected control byte
 Client construction and server parsing validate Host authority syntax, including
 IP-literal brackets, percent escapes and decimal ports. Empty hosts, userinfo,
 paths and query/fragment delimiters are rejected. Valid Host spelling is retained.
+Servers validate extension offer syntax before ignoring unsupported extensions.
+Quoted parameter values must unescape to nonempty tokens, as RFC 6455 requires;
+malformed offers fail the handshake. Valid offers do not enable any extension.
 
 `server(transport, limits, context, select_protocol)` parses the request, invokes
 an application callback with target, host, origin and offered protocols, and

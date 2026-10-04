@@ -1,0 +1,60 @@
+package tests;
+
+use ecosystem::websocket as ws;
+use std::bytes;
+use std::testing;
+use std::text;
+use std::utf8;
+
+fn offered_extensions(value: string) -> bytes::Bytes {
+    let raw = testing::expect_ok(utf8::decode(request().encode().to_vec()), "handshake text");
+    bytes::Bytes::from_string(
+        text::replace(raw, "\r\n\r\n", "\r\nSec-WebSocket-Extensions: " + value + "\r\n\r\n"),
+    )
+}
+
+#[test]
+fn malformed_extension_offers_fail_even_when_extensions_are_not_negotiated() -> () {
+    for value in[
+        "",
+        ",",
+        ";flag",
+        "deflate;",
+        "deflate;=value",
+        "deflate;name=",
+        "deflate;name=\"\"",
+        "deflate;name=\"two words\"",
+        "deflate;name=\"\\,\"",
+        "deflate;name=\"unterminated",
+        "deflate;name=\"ok\"junk",
+        "deflate junk",
+        "deflate\r\nSec-WebSocket-Extensions: other;name=",
+    ] {
+        testing::assert_eq(
+            testing::expect_err(
+                ws::ServerRequest::parse(offered_extensions(value), 16384),
+                "malformed extension offer",
+            ).kind,
+            ws::ErrorKind::Handshake,
+        );
+    }
+}
+
+#[test]
+fn valid_extension_offers_are_validated_and_left_unnegotiated() -> () {
+    for value in[
+        "permessage-deflate;client_max_window_bits",
+        "permessage-deflate; client_max_window_bits=15;server_no_context_takeover",
+        "unknown; token=\"quoted\"; flag",
+        "unknown; token=\"\\v\\a\\l\\u\\e\"",
+        ",foo; name=\"v1+test\", ,bar ; flag ,",
+        "permessage-deflate\r\nSec-WebSocket-Extensions: other;name=token",
+    ] {
+        let parsed = testing::expect_ok(
+            ws::ServerRequest::parse(offered_extensions(value), 16384),
+            "valid offer",
+        );
+        let response = testing::expect_ok(parsed.response(Option::None), "no extension selected");
+        testing::assert_ok(request().validate_response(response, 16384));
+    }
+}

@@ -232,6 +232,10 @@ impl ServerRequest {
             )
         }
         validate_upgrade(headers)?;
+        if has(headers, "sec-websocket-extensions")
+            && !valid_extension_offers(all(headers, "sec-websocket-extensions")) {
+            return Result::Err(error(ErrorKind::Handshake, "invalid WebSocket extension offer"))
+        }
         let host = one(headers, "host", true)?;
         if !valid_host(host) {
             return Result::Err(error(ErrorKind::Handshake, "invalid host"))
