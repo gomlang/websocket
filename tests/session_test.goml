@@ -215,3 +215,28 @@ fn aggregate_limit_and_abnormal_eof() -> () {
         ws::ErrorKind::UnexpectedEof,
     );
 }
+
+#[test]
+fn truncated_eof_fails_the_session_and_rejects_later_operations() -> () {
+    let wire = testing::expect_ok(ws::encode_frame(text_frame("Hello"), Option::None), "wire");
+    for split in 1..wire.len() {
+        let client = session(ws::Role::Client);
+        testing::assert_ok(client.feed(wire.slice(0, split)));
+        testing::assert_none(testing::expect_ok(client.next(), "partial frame"));
+        equal(
+            testing::expect_err(client.finish(), "truncated EOF").kind,
+            ws::ErrorKind::UnexpectedEof,
+        );
+        equal(client.state(), ws::State::Failed);
+        equal(
+            testing::expect_err(client.send(ws::Message::Text("after EOF")), "terminal send").kind,
+            ws::ErrorKind::Closed,
+        );
+        equal(
+            testing::expect_err(client.feed(wire.slice(split, wire.len())), "terminal input").kind,
+            ws::ErrorKind::Closed,
+        );
+        equal(testing::expect_err(client.next(), "terminal receive").kind, ws::ErrorKind::Closed);
+        equal(client.queued_frames(), 0);
+    }
+}

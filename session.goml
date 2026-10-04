@@ -419,7 +419,10 @@ impl Session {
     }
 
     pub fn finish(self: Session) -> Result[(), Error] {
-        self.decoder.finish()?;
+        if let Err(problem) = self.decoder.finish() {
+            self.state_value.set(State::Failed);
+            return Result::Err(problem)
+        }
         if self.state() != State::Closed {
             self.state_value.set(State::Failed);
             Result::Err(

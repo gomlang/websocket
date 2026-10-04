@@ -142,6 +142,26 @@ fn buffer_backpressure_is_retryable_and_truncation_detected() -> () {
 }
 
 #[test]
+fn truncated_eof_poisoning_prevents_decoder_resumption() -> () {
+    let wire = testing::expect_ok(ws::encode_frame(text_frame("Hello"), Option::None), "wire");
+    for split in 1..wire.len() {
+        let parser = decoder(ws::Role::Client);
+        testing::assert_ok(parser.push(wire.slice(0, split)));
+        testing::assert_none(testing::expect_ok(parser.next(), "partial frame"));
+        equal(
+            testing::expect_err(parser.finish(), "truncated EOF").kind,
+            ws::ErrorKind::UnexpectedEof,
+        );
+        equal(
+            testing::expect_err(parser.push(wire.slice(split, wire.len())), "terminal input").kind,
+            ws::ErrorKind::Closed,
+        );
+        equal(testing::expect_err(parser.next(), "terminal decoder").kind, ws::ErrorKind::Closed);
+        equal(testing::expect_err(parser.finish(), "terminal EOF").kind, ws::ErrorKind::Closed);
+    }
+}
+
+#[test]
 fn invalid_encoder_arguments_and_limits() -> () {
     testing::assert_err(ws::encode_frame(text_frame("x"), Option::Some(bytes::Bytes::new())));
     testing::assert_err(

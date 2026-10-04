@@ -189,6 +189,7 @@ impl Decoder {
         if self.failed.get() {
             Result::Err(error(ErrorKind::Closed, "decoder failed"))
         } else if self.buffered() != 0 {
+            self.failed.set(true);
             Result::Err(error(ErrorKind::UnexpectedEof, "incomplete WebSocket frame"))
         } else {
             Result::Ok(())

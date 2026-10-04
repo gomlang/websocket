@@ -119,7 +119,9 @@ control frames awaiting queue capacity are retained for retry. `output` returns
 a copy of the next frame's unsent bytes; `consume_output` supports partial
 writes. Payloads are snapshotted when enqueued. Protocol errors poison the
 session; network connections abort on these errors. `finish` distinguishes a
-complete closing handshake from truncated/abnormal EOF.
+complete closing handshake from truncated/abnormal EOF. A truncated EOF is
+terminal for both the decoder and session; further input or messages cannot
+resume the failed stream.
 
 ## Validation
 
