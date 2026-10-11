@@ -8,7 +8,7 @@ TCP/TLS streams; this module contains no Go adapter or Python helper.
 
 ```toml
 [dependencies]
-"ecosystem::websocket" = "0.1.0"
+"ecosystem::websocket" = true
 ```
 
 The reference protocol is [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455),
@@ -149,9 +149,9 @@ resume the failed stream.
 
 ```sh
 cd ~/git/gomlang/websocket
-../../goml-dev/stage2/bin/goml fmt --check
-../../goml-dev/stage2/bin/goml test
-GOFLAGS=-race ../../goml-dev/stage2/bin/goml test --target-dir _artifact/race --timeout 300s
+goml fmt --check
+goml test
+GOFLAGS=-race goml test --target-dir _artifact/race --timeout 300s
 ```
 
 Native GoML tests cover the RFC accept digest and exact Hello wire vectors,
@@ -170,12 +170,12 @@ server application. Cross-implementation Autobahn certification is not claimed.
 
 ## Development and examples
 
-Requires GoML 0.1.56 or newer. The `examples/basic/` example shares the root manifest and its dependencies. From the library root, run:
+Requires a current GoML toolchain supporting unversioned registry dependencies; see [the pinned ecosystem toolchain](https://github.com/gomlang/verification/blob/main/ci/toolchain.json). The `examples/basic/` example shares the root manifest and its dependencies. From the library root, run:
 
 ```sh
 goml run --example basic
 goml test
-goml verify --timeout 300s
+(cd ../verification && just ecosystem-test websocket)
 ```
 
-`goml test` builds the example and runs its tests. `goml verify` repeats the example checks as an independent module against an isolated registry snapshot. `(cd ../verification && just ecosystem-test websocket)` also retains the library-specific smoke and compatibility checks.
+`goml test` builds the example and runs its tests. The ecosystem verifier uses an isolated registry snapshot and runs the library-specific smoke and compatibility checks.
