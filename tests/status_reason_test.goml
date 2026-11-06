@@ -1,0 +1,46 @@
+package tests;
+
+use ecosystem::websocket as ws;
+use std::bytes;
+use std::testing;
+
+#[test]
+fn upgrade_response_reason_accepts_horizontal_tabs() -> () {
+    let request = testing::expect_ok(
+        ws::ClientRequest::with_key("example.com", "/", Vec::new(), "dGhlIHNhbXBsZSBub25jZQ=="),
+        "request",
+    );
+    let response = bytes::Bytes::from_string(
+        "HTTP/1.1 101 Switching\tProtocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n",
+    );
+    testing::assert_none(
+        testing::expect_ok(request.validate_response(response, 16384), "legal reason tab"),
+    );
+}
+
+#[test]
+fn reason_tabs_do_not_allow_request_target_or_status_code_tabs() -> () {
+    let request = testing::expect_ok(
+        ws::ClientRequest::with_key("example.com", "/", Vec::new(), "dGhlIHNhbXBsZSBub25jZQ=="),
+        "request",
+    );
+    for line in[
+        "HTTP/1.1 10\t1 Switching",
+        "HTTP/1.1\t101 Switching",
+        "HTTP/1.1 101 Bad\u0001",
+        "HTTP/1.1 101 Bad\u007f",
+    ] {
+        let response = bytes::Bytes::from_string(
+            line
+                + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n",
+        );
+        testing::assert_err(request.validate_response(response, 16384));
+    }
+    for line in["GET /bad\ttarget HTTP/1.1", "GET\t/ HTTP/1.1"] {
+        let input = bytes::Bytes::from_string(
+            line
+                + "\r\nHost: example.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+        );
+        testing::assert_err(ws::ServerRequest::parse(input, 16384));
+    }
+}

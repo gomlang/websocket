@@ -74,6 +74,15 @@ fn valid_host(value: string) -> bool {
     }
 }
 
+fn clean_http_field(value: string) -> bool {
+    for byte in value.to_bytes() {
+        if (byte < 32 && byte != 9) || byte > 126 {
+            return false
+        }
+    }
+    true
+}
+
 fn protocols(value: string) -> Result[Vec[string], Error] {
     let result: Vec[string] = Vec::new();
     for item in text::split(value, ",") {
@@ -224,7 +233,7 @@ impl ServerRequest {
     pub fn parse(request: bytes::Bytes, limit: isize) -> Result[ServerRequest, Error] {
         let (first, headers) = parse_head(request, limit)?;
         let parts = text::split(first, " ");
-        if parts.len() != 3 || parts[0] != "GET" || parts[2] != "HTTP/1.1"
+        if !clean(first, true) || parts.len() != 3 || parts[0] != "GET" || parts[2] != "HTTP/1.1"
             || !text::starts_with_at(parts[1], 0, "/")
             || text::find(parts[1], "#").is_some() {
             return Result::Err(
@@ -367,7 +376,7 @@ fn parse_head(input: bytes::Bytes, limit: isize) -> Result[(string, Vec[(string,
     )?;
     let lines = text::split(value, "\r\n");
     if lines.len() < 3 || lines[lines.len() - 1] != "" || lines[lines.len() - 2] != ""
-        || !clean(lines[0], true) {
+        || !clean_http_field(lines[0]) {
         return Result::Err(error(ErrorKind::Handshake, "handshake must end in CRLF CRLF"))
     }
     let headers = Vec::new();
@@ -381,10 +390,8 @@ fn parse_head(input: bytes::Bytes, limit: isize) -> Result[(string, Vec[(string,
                 error(ErrorKind::Handshake, "invalid HTTP header name or folded line"),
             )
         }
-        for byte in value.to_bytes() {
-            if (byte < 32 && byte != 9) || byte > 126 {
-                return Result::Err(error(ErrorKind::Handshake, "invalid HTTP header value"))
-            }
+        if !clean_http_field(value) {
+            return Result::Err(error(ErrorKind::Handshake, "invalid HTTP header value"))
         }
         headers.push((text::to_ascii_lowercase(name), text::trim(value)));
     }
